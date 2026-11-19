@@ -829,3 +829,15 @@ window.addEventListener('keydown',e=>{if(choiceActive&&'123'.includes(e.key))cho
 </script>
 </body>
 </html>
+
+speechSynthesis.cancel();
+speechSynthesis.resume();
+
+const voz = new SpeechSynthesisUtterance(
+  "Hola, bienvenido a tu experiencia docente Wiener."
+);
+voz.lang = "es-ES";
+voz.volume = 1;
+voz.rate = 0.95;
+
+speechSynthesis.speak(voz);
