@@ -774,11 +774,11 @@ function chooseVoice(){
  const voices=speechSynthesis.getVoices();
  const spanish=voices.filter(v=>/^es([-_]|$)/i.test(v.lang));
  // Prefer natural Spanish Latin American voices when installed; do not force a robotic regional voice.
- const score=v=> (/natural|neural|premium|enhanced|online/i.test(v.name)?120:0)
+ const score=v=> (v.localService?150:0)
    + (/es[-_](PE|MX|CO|CL|AR|US)/i.test(v.lang)?35:0)
    + (/google|microsoft/i.test(v.name)?20:0)
    + (/paulina|sabina|dalia|elvira|helena|monica|sofia|luciana/i.test(v.name)?15:0)
-   + (!v.localService?12:0);
+   + (v.default?10:0);
  preferredVoice=spanish.sort((a,b)=>score(b)-score(a))[0]||null;
 }
 chooseVoice();if('speechSynthesis' in window)speechSynthesis.addEventListener?.('voiceschanged',chooseVoice);
@@ -794,19 +794,26 @@ function speak(t,done){
  if(!voice||!('speechSynthesis' in window)){
    setTimeout(()=>{if(token===voiceToken)done()},Math.max(1700,Math.min(8500,t.length*53)));return;
  }
- speechSynthesis.cancel();chooseVoice();
- // Keep full phrases in a single utterance to avoid the audible cut between sentences.
- // The original recording serves as a delivery reference: measured, warm and conversational.
+ const synth=window.speechSynthesis;
+ synth.cancel();chooseVoice();
  const clean=t.replace(/\s+/g,' ').replace(/\s*([,;:.!?])\s*/g,'$1 ').trim();
- utter=new SpeechSynthesisUtterance(clean);
- utter.lang=preferredVoice?.lang||'es-PE';
- if(preferredVoice)utter.voice=preferredVoice;
- utter.rate=0.96;
- utter.pitch=1.0;
- utter.volume=1;
- utter.onend=()=>{if(token===voiceToken)done()};
- utter.onerror=()=>{if(token===voiceToken)done()};
- speechSynthesis.speak(utter);
+ let attempts=0,completed=false;
+ function launch(defaultVoice=false){
+   if(token!==voiceToken||completed)return;
+   const u=new SpeechSynthesisUtterance(clean);
+   utter=u;
+   u.lang=defaultVoice?'es-ES':(preferredVoice?.lang||'es-PE');
+   if(!defaultVoice&&preferredVoice)u.voice=preferredVoice;
+   u.rate=0.96;u.pitch=1;u.volume=1;
+   u.onend=()=>{if(token===voiceToken&&!completed){completed=true;done()}};
+   u.onerror=e=>{
+     if(token!==voiceToken||completed)return;
+     if(attempts++<2){synth.cancel();setTimeout(()=>launch(true),250)}
+     else{$('sub').textContent=clean+' · No se pudo iniciar el audio. Pulsa el botón de repetir audio.';console.warn('Narración:',e.error)}
+   };
+   try{synth.speak(u);if(synth.paused)synth.resume()}catch(e){u.onerror({error:e.message})}
+ }
+ launch();
 }
 function stopVoice(){voiceToken++;if('speechSynthesis'in window)speechSynthesis.cancel();utter=null}
 function startStep(){if(step>=scenes.length){finish();return}const s=scenes[step];app.dataset.mode='play';app.classList.remove('deciding','dim');setScene(s.img);progress();$('chNum').textContent=String(step+1).padStart(2,'0');$('chT').textContent=s.phase;$('chS').textContent='Tu experiencia docente';$('chapter').classList.remove('go');void $('chapter').offsetWidth;$('chapter').classList.add('go');
@@ -815,7 +822,7 @@ function startStep(){if(step>=scenes.length){finish();return}const s=scenes[step
 function decision(){const s=scenes[step];stopVoice();$('vSubs').classList.remove('on');$('dqE').innerHTML='<b>Decisión '+String(step+1).padStart(2,'0')+'</b>'+s.phase;$('dqQ').textContent=s.q;$('dqS').textContent=s.sub;const choices=$('choices');choices.innerHTML='';s.opts.forEach((o,i)=>{const b=document.createElement('button');b.className='ch shown ready';b.innerHTML=`<span class="bd"><span class="key">${'ABC'[i]}</span><span class="tx">${o[0]}</span></span>`;b.onclick=()=>choose(i);choices.appendChild(b)});$('readSt').textContent='Elige una opción';$('readout').classList.add('ready');$('readBar').style.width='100%';app.classList.add('deciding');show('vDecision');choiceActive=true}
 function choose(i){if(!choiceActive)return;choiceActive=false;const s=scenes[step],o=s.opts[i];results[step]={choice:i,score:o.slice(2)};app.classList.remove('deciding');$('ocTag').textContent='Consecuencia · Ruta '+ 'ABC'[i];$('ocH').textContent=i===1?'¡Buena decisión docente!':'Revisa el impacto de tu elección';$('ocP').textContent=o[1];$('ocBadge').style.display='none';show('vOutcome');$('vSubs').classList.remove('on');speak(o[1],()=>{show('vPrinciple');$('pr').innerHTML=`<div class="k"><svg class="i"><use href="#i-bulb"/></svg>Recuerda</div><div class="q" style="font-size:clamp(22px,2.5vw,39px)">${s.tip}</div><div class="flow"><span class="hot">Aplica en tu próxima sesión</span></div>`;speak(s.tip,()=>{step++;startStep()})});}
 function finish(){stopVoice();app.dataset.mode='final';$('sim').classList.remove('on');setScene(5);progress();show('vFinal');$('retoTxt').innerHTML='Antes, durante y después de cada sesión, tomaré decisiones informadas para orientar, involucrar y acompañar a mis estudiantes.';const names=['Generalidades','Antes de clase','Inicio de clase','Durante la clase','Después de clase'];$('map').innerHTML=names.map((n,i)=>`<div class="col"><div class="ct">${n}</div><div class="node on">${'ABC'[results[i].choice]} · ${['Verificar','Alinear','Orientar','Involucrar','Retroalimentar'][i]}</div></div>`).join('');$('finMeters').innerHTML='';$('vFinal').classList.add('on');app.classList.remove('fin-intro');['copyBtn','otherBtn','resetBtn'].forEach(id=>$(id).disabled=false);$('sub').textContent='';}
-$('startBtn').onclick=()=>{paused=false;app.classList.remove('paused');started=true;step=0;results=[];startStep()};$('otherBtn').onclick=()=>{step=0;results=[];startStep()};$('resetBtn').onclick=()=>{stopVoice();step=-1;results=[];app.dataset.mode='start';$('sim').classList.remove('on');setScene(1);progress();show('vStart');$('vStart').classList.remove('playing')};$('copyBtn').onclick=()=>{const t=$('retoTxt').textContent;navigator.clipboard?.writeText(t).then(()=>{$('toast').textContent='Reto copiado';$('toast').classList.add('on');setTimeout(()=>$('toast').classList.remove('on'),1800)})};
+$('startBtn').onclick=()=>{if('speechSynthesis' in window){speechSynthesis.cancel();speechSynthesis.resume()}paused=false;app.classList.remove('paused');started=true;step=0;results=[];startStep()};$('otherBtn').onclick=()=>{step=0;results=[];startStep()};$('resetBtn').onclick=()=>{stopVoice();step=-1;results=[];app.dataset.mode='start';$('sim').classList.remove('on');setScene(1);progress();show('vStart');$('vStart').classList.remove('playing')};$('copyBtn').onclick=()=>{const t=$('retoTxt').textContent;navigator.clipboard?.writeText(t).then(()=>{$('toast').textContent='Reto copiado';$('toast').classList.add('on');setTimeout(()=>$('toast').classList.remove('on'),1800)})};
 $('ppBtn').onclick=()=>{paused=!paused;app.classList.toggle('paused',paused);if('speechSynthesis'in window){paused?speechSynthesis.pause():speechSynthesis.resume()}$('ppUse').setAttribute('href',paused?'#i-play':'#i-pause')};$('skBtn').onclick=()=>{if(started&&step>=0&&step<5){stopVoice();decision()}};$('rpBtn').onclick=()=>{if(started&&step>=0&&step<5){stopVoice();startStep()}};$('ccBtn').onclick=()=>{cc=!cc;$('ccBtn').classList.toggle('on',cc);$('vSubs').classList.toggle('on',cc&&!choiceActive)};$('muBtn').onclick=()=>{voice=!voice;stopVoice();$('muBtn').classList.toggle('on',voice);$('muBtn').setAttribute('aria-label',voice?'Desactivar narración':'Activar narración')};$('fsBtn').onclick=()=>{if(document.fullscreenElement)document.exitFullscreen();else document.documentElement.requestFullscreen?.()};$('speed').style.display='none';$('spd1').style.display='none';$('time').textContent='Narración guiada';$('muBtn').title='Activar o desactivar narración';$('muBtn').setAttribute('aria-label','Activar o desactivar narración');
 window.addEventListener('keydown',e=>{if(choiceActive&&'123'.includes(e.key))choose(Number(e.key)-1)});setScene(1);progress();
 })();
